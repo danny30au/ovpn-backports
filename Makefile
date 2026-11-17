@@ -29,6 +29,62 @@ endif
 
 DEBUG ?= 0
 ccflags-y += -Werror
+
+# WQ_PERCPU is an enum member, so #ifndef cannot detect its availability.
+# Stable and distribution kernels also backport it to older baselines.
+# Inspect the source header during Kbuild to support split header packages.
+ifneq ($(srctree),)
+OVPN_HAVE_WQ_PERCPU := $(shell \
+	grep -qE '^[[:space:]]*WQ_PERCPU[[:space:]]*=' \
+		$(srctree)/include/linux/workqueue.h && echo 1)
+ifeq ($(OVPN_HAVE_WQ_PERCPU),)
+ccflags-y += -DOVPN_NO_WQ_PERCPU
+endif
+endif
+
+# RHEL_RELEASE_CODE only identifies the RHEL major and minor release. During
+# development, incompatible backports may instead be identified by the
+# monotonically increasing build number in the quoted RHEL_RELEASE string.
+# Released kernels may append z-stream components (for example, "55.9.1"), so
+# we expose its first component as a number for generic version comparisons
+# rather than adding a Makefile header probe for each backported feature.
+OVPN_RHEL_RELEASE_BUILD := $(shell \
+	sed -n 's/^\#define RHEL_RELEASE "\([0-9][0-9]*\).*/\1/p' \
+		$(KERNEL_SRC)/include/generated/uapi/linux/version.h)
+ifneq ($(OVPN_RHEL_RELEASE_BUILD),)
+ccflags-y += -DOVPN_RHEL_RELEASE_BUILD=$(OVPN_RHEL_RELEASE_BUILD)
+endif
+
+# Ubuntu backports can change APIs without changing the upstream version.
+# ABI numbers are specific to a kernel series and flavor, so expose both
+# values from the target headers rather than the running kernel.
+# Mainline builds encode upstream versions as zero-prefixed ABIs. Ignore
+# those identifiers so the upstream version checks apply.
+ifneq ("$(wildcard $(KERNEL_SRC)/include/generated/utsrelease.h)","")
+OVPN_UBUNTU_RELEASE_ABI := $(shell \
+	sed -n 's/^\#define UTS_UBUNTU_RELEASE_ABI \([1-9][0-9]*\)$$/\1/p' \
+		$(KERNEL_SRC)/include/generated/utsrelease.h)
+ifneq ($(OVPN_UBUNTU_RELEASE_ABI),)
+ccflags-y += -DOVPN_UBUNTU_RELEASE_ABI=$(OVPN_UBUNTU_RELEASE_ABI)
+OVPN_UBUNTU_FLAVOR := $(shell \
+	sed -n 's/^\#define UTS_RELEASE "[^"]*-[0-9][0-9]*-\([^"]*\)"$$/\1/p' \
+		$(KERNEL_SRC)/include/generated/utsrelease.h)
+ifeq ($(OVPN_UBUNTU_FLAVOR),generic)
+ccflags-y += -DOVPN_UBUNTU_FLAVOR=OVPN_UBUNTU_FLAVOR_GENERIC
+else ifeq ($(OVPN_UBUNTU_FLAVOR),aws)
+ccflags-y += -DOVPN_UBUNTU_FLAVOR=OVPN_UBUNTU_FLAVOR_AWS
+else ifeq ($(OVPN_UBUNTU_FLAVOR),azure)
+ccflags-y += -DOVPN_UBUNTU_FLAVOR=OVPN_UBUNTU_FLAVOR_AZURE
+else ifeq ($(OVPN_UBUNTU_FLAVOR),oracle)
+ccflags-y += -DOVPN_UBUNTU_FLAVOR=OVPN_UBUNTU_FLAVOR_ORACLE
+else ifeq ($(OVPN_UBUNTU_FLAVOR),ibm)
+ccflags-y += -DOVPN_UBUNTU_FLAVOR=OVPN_UBUNTU_FLAVOR_IBM
+else ifeq ($(OVPN_UBUNTU_FLAVOR),gcp)
+ccflags-y += -DOVPN_UBUNTU_FLAVOR=OVPN_UBUNTU_FLAVOR_GCP
+endif # OVPN_UBUNTU_FLAVOR
+endif # OVPN_UBUNTU_RELEASE_ABI
+endif # generated/utsrelease.h exists
+
 ifeq ($(DEBUG),1)
     ccflags-y += -g -DDEBUG
 endif

@@ -26,6 +26,16 @@
 #ifndef RHEL_RELEASE_VERSION
 #define RHEL_RELEASE_VERSION(m, n) 1
 #endif
+#ifndef OVPN_RHEL_RELEASE_BUILD
+#define OVPN_RHEL_RELEASE_BUILD 0
+#endif
+
+#define OVPN_RHEL_RELEASE_AT_LEAST(major, minor, build) \
+	(RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(major, minor) || \
+	 (RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(major, minor) && \
+	  OVPN_RHEL_RELEASE_BUILD >= (build)))
+#define OVPN_RHEL_RELEASE_BEFORE(major, minor, build) \
+	(!OVPN_RHEL_RELEASE_AT_LEAST(major, minor, build))
 
 #ifndef SUSE_PRODUCT_CODE
 #define SUSE_PRODUCT_CODE 0
@@ -54,15 +64,67 @@
 	 SUSE_PRODUCT_CODE < SUSE_PRODUCT(SUSE_PRODUCT_CODE_SLE, v, pl, aux))
 
 /*
+ * The Makefile extracts Ubuntu's kernel ABI and flavor from the target's
+ * generated/utsrelease.h. The ABI is not an Ubuntu OS release number, and
+ * different kernel series and flavors have independent ABI numbering.
+ */
+#define OVPN_UBUNTU_FLAVOR_GENERIC 1
+#define OVPN_UBUNTU_FLAVOR_AWS 2
+#define OVPN_UBUNTU_FLAVOR_AZURE 3
+#define OVPN_UBUNTU_FLAVOR_ORACLE 4
+#define OVPN_UBUNTU_FLAVOR_IBM 5
+#define OVPN_UBUNTU_FLAVOR_GCP 6
+#ifndef OVPN_UBUNTU_FLAVOR
+#define OVPN_UBUNTU_FLAVOR 0
+#endif
+#ifndef OVPN_UBUNTU_RELEASE_ABI
+#define OVPN_UBUNTU_RELEASE_ABI 0
+#endif
+
+/* Only compare ABIs within the requested kernel series and flavor.
+ * BEFORE is also true for other series/flavors and non-Ubuntu kernels,
+ * so it can be combined with upstream version checks.
+ */
+#define OVPN_UBUNTU_ABI_AT_LEAST(flavor, major, minor, abi) \
+	(OVPN_UBUNTU_RELEASE_ABI > 0 && \
+	 OVPN_UBUNTU_FLAVOR == (flavor) && \
+	 LINUX_VERSION_CODE >= KERNEL_VERSION(major, minor, 0) && \
+	 LINUX_VERSION_CODE < KERNEL_VERSION(major, (minor) + 1, 0) && \
+	 OVPN_UBUNTU_RELEASE_ABI >= (abi))
+#define OVPN_UBUNTU_ABI_BEFORE(flavor, major, minor, abi) \
+	(!OVPN_UBUNTU_ABI_AT_LEAST(flavor, major, minor, abi))
+
+/*
  * proto::recvmsg lost the noblock argument in v5.19 and lost the addr_len
  * argument in v7.1. The addr_len removal was also backported to 6.18.y
- * starting with v6.18.40 (gregkh/linux@073d957).
+ * starting with v6.18.40 (gregkh/linux@073d957), and to Ubuntu 7.0 generic
+ * ABI 38, AWS ABI 1014, Azure ABI 1016, Oracle ABI 1013, IBM ABI 1015
+ * and GCP ABI 1014.
  */
 #define OVPN_PROTO_RECVMSG_HAS_ADDR_LEN \
 	(LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0) && \
 	 LINUX_VERSION_CODE < KERNEL_VERSION(7, 1, 0) && \
 	 !(LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 40) && \
-	   LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)))
+	   LINUX_VERSION_CODE < KERNEL_VERSION(6, 19, 0)) && \
+	 OVPN_UBUNTU_ABI_BEFORE(OVPN_UBUNTU_FLAVOR_GENERIC, 7, 0, 38) && \
+	 OVPN_UBUNTU_ABI_BEFORE(OVPN_UBUNTU_FLAVOR_AWS, 7, 0, 1014) && \
+	 OVPN_UBUNTU_ABI_BEFORE(OVPN_UBUNTU_FLAVOR_AZURE, 7, 0, 1016) && \
+	 OVPN_UBUNTU_ABI_BEFORE(OVPN_UBUNTU_FLAVOR_ORACLE, 7, 0, 1013) && \
+	 OVPN_UBUNTU_ABI_BEFORE(OVPN_UBUNTU_FLAVOR_IBM, 7, 0, 1015) && \
+	 OVPN_UBUNTU_ABI_BEFORE(OVPN_UBUNTU_FLAVOR_GCP, 7, 0, 1014))
+
+/* setup_udp_tunnel_sock() takes struct sock instead of struct socket
+ * starting with v7.1.5, and in Ubuntu 7.0 generic ABI 38, AWS ABI 1014
+ * Azure ABI 1016, Oracle ABI 1013, IBM ABI 1015 and GCP ABI 1014.
+ */
+#define OVPN_SETUP_UDP_TUNNEL_SOCK_USES_SOCK \
+	(LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 5) || \
+	 OVPN_UBUNTU_ABI_AT_LEAST(OVPN_UBUNTU_FLAVOR_GENERIC, 7, 0, 38) || \
+	 OVPN_UBUNTU_ABI_AT_LEAST(OVPN_UBUNTU_FLAVOR_AWS, 7, 0, 1014) || \
+	 OVPN_UBUNTU_ABI_AT_LEAST(OVPN_UBUNTU_FLAVOR_AZURE, 7, 0, 1016) || \
+	 OVPN_UBUNTU_ABI_AT_LEAST(OVPN_UBUNTU_FLAVOR_ORACLE, 7, 0, 1013) || \
+	 OVPN_UBUNTU_ABI_AT_LEAST(OVPN_UBUNTU_FLAVOR_IBM, 7, 0, 1015) || \
+	 OVPN_UBUNTU_ABI_AT_LEAST(OVPN_UBUNTU_FLAVOR_GCP, 7, 0, 1014))
 
 #include <linux/if_link.h>
 
